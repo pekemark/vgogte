@@ -75,8 +75,8 @@ void concurrent_queue::check() {
 concurrent_queue::concurrent_queue() {
 	head = argo::conew_<item*>();
 	tail = argo::conew_<item*>();
-	enq_lock = new argo::globallock::cohort_lock();
-	deq_lock = new argo::globallock::cohort_lock();
+	enq_lock = new argo::backend::persistence::persistence_lock<argo::globallock::cohort_lock>(new argo::globallock::cohort_lock());
+	deq_lock = new argo::backend::persistence::persistence_lock<argo::globallock::cohort_lock>(new argo::globallock::cohort_lock());
 	num_sub_items = NUM_SUB_ITEMS;
 }
 
@@ -84,6 +84,8 @@ concurrent_queue::~concurrent_queue() {
 	int temp;
 	while(pop(temp));
 	
+	delete enq_lock->get_lock();
+	delete deq_lock->get_lock();
 	delete enq_lock;
 	delete deq_lock;
 	argo::codelete_(head);
