@@ -1,5 +1,5 @@
 # Set your ArgoDSM installation directory
-export ARGO_INSTALL_DIRECTORY=${HOME}/argodsm/install
+export ARGO_INSTALL_DIRECTORY ?= ${HOME}/argodsm/install
 
 CXX      =mpic++
 CXXFLAGS =-O3 -lpthread -std=c++11
