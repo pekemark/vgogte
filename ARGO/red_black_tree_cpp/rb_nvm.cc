@@ -29,7 +29,7 @@ int workrank;
 int numtasks;
 
 // Cohort lock for the whole tree
-argo::globallock::cohort_lock* lock_1;
+argo::backend::persistence::persistence_lock<argo::globallock::cohort_lock>* lock_1;
 
 int* array;
 Red_Black_Tree* RB;
@@ -39,9 +39,11 @@ void initialize() {
 }
 
 void* run_stub(void* ptr) {
+	persistence_registry.register_thread();
 	for (int i = 0; i < NUM_OPS/(NUM_THREADS*numtasks); ++i) {
 		RB->rb_delete_or_insert(NUM_UPDATES_PER_CS);
 	}
+	persistence_registry.unregister_thread();
 	return NULL;
 }
 
@@ -61,11 +63,12 @@ void verify(Node* root) {
 
 int main(int argc, char** argv) {
 	argo::init(256*1024*1024UL, 256*1024*1024UL);
+	persistence_registry.register_thread();
 
 	workrank = argo::node_id();
 	numtasks = argo::number_of_nodes();
 
-	lock_1 = new argo::globallock::cohort_lock();
+	lock_1 = new argo::backend::persistence::persistence_lock<argo::globallock::cohort_lock>(new argo::globallock::cohort_lock());
 
 	MAIN_PROC(workrank, std::cout << "In main\n" << std::endl);
 	struct timeval tv_start;
@@ -89,10 +92,12 @@ int main(int argc, char** argv) {
 			RB->rb_print();
 			fflush(stdout);
 	});
-	argo::barrier();
+	argo::backend::persistence::apb_barrier(&argo::barrier, 1UL);
 	MAIN_PROC(workrank, std::cout << "Done with RBtree creation" << std::endl);
 
 	pthread_t T[NUM_THREADS];
+
+	persistence_registry.get_tracker()->allow_apb();
 
 	gettimeofday(&tv_start, NULL);
 	for (int i = 0; i < NUM_THREADS; ++i) {
@@ -101,7 +106,7 @@ int main(int argc, char** argv) {
 	for (int i = 0; i < NUM_THREADS; ++i) {
 		pthread_join(T[i], NULL);
 	}
-	argo::barrier();
+	argo::backend::persistence::apb_barrier(&argo::barrier, 1UL);
 	gettimeofday(&tv_end, NULL);
 	MAIN_PROC(workrank, if (DEBUG_RBT) {
 			printf("|Exec: RBTree|\n");
@@ -124,6 +129,7 @@ int main(int argc, char** argv) {
 
 	MAIN_PROC(workrank, std::cout << "Finished!" << std::endl);
 
+	persistence_registry.unregister_thread();
 	argo::finalize();
 
 	return 0;

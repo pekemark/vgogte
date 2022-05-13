@@ -11,7 +11,7 @@ This file defines RB tree functions.
 #include "rb.h"
 
 // Cohort lock for the whole tree
-extern argo::globallock::cohort_lock* lock_1;
+extern argo::backend::persistence::persistence_lock<argo::globallock::cohort_lock>* lock_1;
 
 void Red_Black_Tree::left_rotation(Node* x) {
 	Node* y = x->right;
@@ -463,7 +463,7 @@ void Red_Black_Tree::initialize(Node* root, int* array, unsigned length) {
 
 	tree_length = length;
 	//init mutex
-	// lock_1 = argo::new_<argo::globallock::cohort_lock>();
+	// lock_1 = new argo::backend::persistence::persistence_lock<argo::globallock::cohort_lock>(new argo::globallock::cohort_lock());
 	return;
 }
 
@@ -484,7 +484,7 @@ Red_Black_Tree::Red_Black_Tree(Node* root, int* array, unsigned length) {
 
 	tree_length = length;
 	//init mutex
-	// lock_1 = argo::new_<argo::globallock::cohort_lock>();
+	// lock_1 = new argo::backend::persistence::persistence_lock<argo::globallock::cohort_lock>(new argo::globallock::cohort_lock());
 }
 
 Node* Red_Black_Tree::createNode(int _val) {

@@ -8,6 +8,7 @@ Ioannis Anevlavis <ioannis.anevlavis@etascale.com>
 
 #include "argo.hpp"
 #include "cohort_lock.hpp"
+#include "backend/mpi/persistence.hpp"
 
 #include <cstdlib>
 #include <assert.h>
@@ -74,7 +75,7 @@ class Red_Black_Tree {
 	// mutex for the whole tree
 	// note: this program has NO parallelism. Using mutex only creates a 
 	// thread-safe tree
-	// argo::globallock::cohort_lock* lock_1;
+	// argo::backend::persistence::persistence_lock<argo::globallock::cohort_lock>* lock_1;
 
 	int tree_length;
 
