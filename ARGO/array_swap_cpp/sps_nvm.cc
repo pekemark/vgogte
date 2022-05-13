@@ -10,6 +10,7 @@ This microbenchmark swaps two items in an array.
 
 #include "argo.hpp"
 #include "cohort_lock.hpp"
+#include "backend/mpi/persistence.hpp"
 
 #include <cstdint>
 #include <assert.h>
@@ -59,7 +60,7 @@ struct Datum {
 	// pointer to the hashmap
 	Element* elements_;
 	// A lock which protects this Datum
-	argo::globallock::cohort_lock* lock_;
+	argo::backend::persistence::persistence_lock<argo::globallock::cohort_lock>* lock_;
 };
 
 struct sps {
@@ -73,7 +74,8 @@ sps* S;
 void datum_init(sps* s) {
 	for(int i = 0; i < NUM_ROWS; i++) {
 		s->array[i].elements_ = argo::conew_<Element>();
-		s->array[i].lock_ = new argo::globallock::cohort_lock();
+		s->array[i].lock_ = new argo::backend::persistence::persistence_lock<argo::globallock::cohort_lock>(new argo::globallock::cohort_lock());
+		persistence_registry.get_tracker()->join_apb(); // TODO: Shouldn't be needed. Incorporate APBs in normal barriers?
 	}
 	MAIN_PROC(workrank, std::cout << "Finished allocating elems & locks" << std::endl);
 
@@ -85,14 +87,17 @@ void datum_init(sps* s) {
 		  << " to: "                 << end
 		  << std::endl;
 
-	for(int i = beg; i < end; i++)
+	for(int i = beg; i < end; i++) {
 		for(int j = 0; j < NUM_SUB_ITEMS; j++)
 			s->array[i].elements_->value_[j] = i+j;
+		persistence_registry.get_tracker()->join_apb();
+	}
 	MAIN_PROC(workrank, std::cout << "Finished team process initialization" << std::endl);
 }
 
 void datum_free(sps* s) {
 	for(int i = 0; i < NUM_ROWS; i++) {
+		delete s->array[i].lock_->get_lock();
 		delete s->array[i].lock_;
 		argo::codelete_(s->array[i].elements_);
 	}
@@ -104,7 +109,7 @@ void initialize() {
 	S->num_sub_items_ = NUM_SUB_ITEMS;
 	S->array = new Datum[NUM_ROWS];
 	datum_init(S);
-	argo::barrier();
+	argo::backend::persistence::apb_barrier(&argo::barrier, 1UL);
 
 	MAIN_PROC(workrank, fprintf(stderr, "Created array at %p\n", (void *)S->array));
 }
@@ -140,16 +145,19 @@ bool swap(unsigned int index_a, unsigned int index_b) {
 }
 
 void* run_stub(void* ptr) {
+	persistence_registry.register_thread();
 	for (int i = 0; i < NUM_OPS/(NUM_THREADS*numtasks); ++i) {
 		int index_a = rand()%NUM_ROWS;
 		int index_b = rand()%NUM_ROWS;
 		swap(index_a, index_b);
 	}
+	persistence_registry.unregister_thread();
 	return NULL;
 }
 
 int main(int argc, char** argv) {
 	argo::init(500*1024*1024UL);
+	persistence_registry.register_thread();
 
 	workrank = argo::node_id();
 	numtasks = argo::number_of_nodes();
@@ -166,6 +174,8 @@ int main(int argc, char** argv) {
 
 	pthread_t threads[NUM_THREADS];
 
+	persistence_registry.get_tracker()->allow_apb();
+
 	gettimeofday(&tv_start, NULL);
 	for (int i = 0; i < NUM_THREADS; ++i) {
 		pthread_create(&threads[i], NULL, &run_stub, NULL);
@@ -173,7 +183,7 @@ int main(int argc, char** argv) {
 	for (int i = 0; i < NUM_THREADS; ++i) {
 		pthread_join(threads[i], NULL);
 	}
-	argo::barrier();
+	argo::backend::persistence::apb_barrier(&argo::barrier, 1UL);
 	gettimeofday(&tv_end, NULL);
 	
 	MAIN_PROC(workrank, fprintf(stderr, "time elapsed %ld us\n",
@@ -186,6 +196,7 @@ int main(int argc, char** argv) {
 	delete[] S->array;
 	delete S;
 
+	persistence_registry.unregister_thread();
 	argo::finalize();
 
 	return 0;
