@@ -10,6 +10,7 @@ This file uses the PersistentCache to enable multi-threaded updates to it.
 
 #include "argo.hpp"
 #include "cohort_lock.hpp"
+#include "backend/mpi/persistence.hpp"
 
 #include <cstdint>
 #include <assert.h>
@@ -55,7 +56,7 @@ struct Datum {
 	// pointer to the hashmap
 	Element* elements_;
 	// A lock which protects this Datum
-	argo::globallock::cohort_lock* lock_;
+	argo::backend::persistence::persistence_lock<argo::globallock::cohort_lock>* lock_;
 };
 
 struct pc {
@@ -70,7 +71,8 @@ pc* P;
 void datum_init(pc* p) {
 	for(int i = 0; i < NUM_ROWS; i++) {
 		p->hashmap[i].elements_ = argo::conew_<Element>();
-		p->hashmap[i].lock_ = new argo::globallock::cohort_lock();
+		p->hashmap[i].lock_ = new argo::backend::persistence::persistence_lock<argo::globallock::cohort_lock>(new argo::globallock::cohort_lock());
+		persistence_registry.get_tracker()->join_apb(); // TODO: Shouldn't be needed. Incorporate APBs in normal barriers?
 	}
 	MAIN_PROC(workrank, std::cout << "Finished allocating elems & locks" << std::endl);
 
@@ -82,14 +84,17 @@ void datum_init(pc* p) {
 		  << " to: "                 << end
 		  << std::endl;
 
-	for(int i = beg; i < end; i++)
+	for(int i = beg; i < end; i++) {
 		for(int j = 0; j < NUM_ELEMS_PER_DATUM; j++)
 			p->hashmap[i].elements_->value_[j] = 0;
+		persistence_registry.get_tracker()->join_apb();
+	}
 	MAIN_PROC(workrank, std::cout << "Finished team process initialization" << std::endl);
 }
 
 void datum_free(pc* p) {
 	for(int i = 0; i < NUM_ROWS; i++) {
+		delete p->hashmap[i].lock_->get_lock();
 		delete p->hashmap[i].lock_;
 		argo::codelete_(p->hashmap[i].elements_);
 	}
@@ -110,22 +115,25 @@ void initialize() {
 	P->num_elems_per_row_ = NUM_ELEMS_PER_DATUM;
 	P->hashmap = new Datum[NUM_ROWS];
 	datum_init(P);
-	argo::barrier();
+	argo::backend::persistence::apb_barrier(&argo::barrier, 1UL);
 
 	MAIN_PROC(workrank, fprintf(stderr, "Created hashmap at %p\n", (void *)P->hashmap));
 }
 
 void* CacheUpdates(void* arguments) {
+	persistence_registry.register_thread();
 	int key;
 	for (int i = 0; i < NUM_UPDATES/(NUM_THREADS*numtasks); i++) {
 		key = rand()%NUM_ROWS;
 		datum_set(key, i);
 	}
+	persistence_registry.unregister_thread();
 	return 0;
 }
 
 int main (int argc, char* argv[]) {
 	argo::init(500*1024*1024UL);
+	persistence_registry.register_thread();
 
 	workrank = argo::node_id();
 	numtasks = argo::number_of_nodes();
@@ -143,6 +151,8 @@ int main (int argc, char* argv[]) {
 
 	pthread_t threads[NUM_THREADS];
 
+	persistence_registry.get_tracker()->allow_apb();
+
 	gettimeofday(&tv_start, NULL);
 	for (int i = 0; i < NUM_THREADS; i++) {
 		pthread_create(&threads[i], NULL, CacheUpdates, NULL);
@@ -150,7 +160,7 @@ int main (int argc, char* argv[]) {
 	for (int i = 0; i < NUM_THREADS; i++) {
 		pthread_join(threads[i], NULL);
 	}
-	argo::barrier();
+	argo::backend::persistence::apb_barrier(&argo::barrier, 1UL);
 	gettimeofday(&tv_end, NULL);
 
 	MAIN_PROC(workrank, fprintf(stderr, "time elapsed %ld us\n",
@@ -165,6 +175,7 @@ int main (int argc, char* argv[]) {
 
 	MAIN_PROC(workrank, std::cout << "Done with persistent cache" << std::endl);
 
+	persistence_registry.unregister_thread();
 	argo::finalize();
 
 	return 0;
