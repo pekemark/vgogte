@@ -37,21 +37,24 @@ void init_db() {
 	unsigned num_subscribers = NUM_SUBSCRIBERS;
 	my_tatp_db = new TATP_DB;
 	my_tatp_db->initialize(num_subscribers,NUM_THREADS);
-	argo::barrier();
+	argo::backend::persistence::apb_barrier(&argo::barrier, 1UL);
 	
 	MAIN_PROC(workrank, fprintf(stderr, "Created tatp db at %p\n", (void *)my_tatp_db));
 }
 
 void* update_locations(void* args) {
+	persistence_registry.register_thread();
 	int thread_id = *((int*)args);
 	for(int i=0; i<NUM_OPS/(NUM_THREADS*numtasks); i++) {
 		my_tatp_db->update_location(thread_id,NUM_OPS_PER_CS);
 	}
+	persistence_registry.unregister_thread();
 	return 0;
 }
 
 int main(int argc, char* argv[]) {
 	argo::init(500*1024*1024UL);
+	persistence_registry.register_thread();
 
 	workrank = argo::node_id();
 	numtasks = argo::number_of_nodes();
@@ -72,6 +75,8 @@ int main(int argc, char* argv[]) {
 	pthread_t threads[NUM_THREADS];
 	int global_tid[NUM_THREADS];
 
+	persistence_registry.get_tracker()->allow_apb();
+
 	gettimeofday(&tv_start, NULL);
 	for(int i=0; i<NUM_THREADS; i++) {
 		global_tid[i] = workrank*NUM_THREADS + i;
@@ -80,7 +85,7 @@ int main(int argc, char* argv[]) {
 	for(int i=0; i<NUM_THREADS; i++) {
 		pthread_join(threads[i], NULL);
 	}
-	argo::barrier();
+	argo::backend::persistence::apb_barrier(&argo::barrier, 1UL);
 	gettimeofday(&tv_end, NULL);
 
 #if ENABLE_VERIFICATION == 1
@@ -97,6 +102,7 @@ int main(int argc, char* argv[]) {
 
 	MAIN_PROC(workrank, std::cout<<"Done with threads"<<std::endl);
 
+	persistence_registry.unregister_thread();
 	argo::finalize();
 
 	return 0;

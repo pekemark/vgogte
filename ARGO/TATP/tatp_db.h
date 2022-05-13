@@ -11,6 +11,7 @@ the database.
 
 #include "argo.hpp"
 #include "cohort_lock.hpp"
+#include "backend/mpi/persistence.hpp"
 
 #include <cstdint>
 #include <pthread.h>
@@ -34,7 +35,7 @@ class TATP_DB{
 		access_info_entry* access_info_table; // Pointer to the access info table
 		special_facility_entry* special_facility_table; // Pointer to the special facility table
 		call_forwarding_entry* call_forwarding_table; // Pointer to the call forwarding table
-		argo::globallock::cohort_lock** lock_; // Lock per subscriber to protect the update
+		argo::backend::persistence::persistence_lock<argo::globallock::cohort_lock>** lock_; // Lock per subscriber to protect the update
 		//std::atomic<long>** txCounts; // Array of tx counts, success and fails
 		unsigned long* subscriber_rndm_seeds;
 		unsigned long* vlr_rndm_seeds;

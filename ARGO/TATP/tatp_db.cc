@@ -46,9 +46,10 @@ void TATP_DB::initialize(unsigned num_subscribers, int n) {
 	// A max of 3 call forwarding entries per "special facility entry"
 	call_forwarding_table= argo::conew_array<call_forwarding_entry>(3*4*num_subscribers);
 
-	lock_ = new argo::globallock::cohort_lock*[num_subscribers];
+	lock_ = new argo::backend::persistence::persistence_lock<argo::globallock::cohort_lock>*[num_subscribers];
 	for(int i=0; i<num_subscribers; i++) {
-		lock_[i] = new argo::globallock::cohort_lock();
+		lock_[i] = new argo::backend::persistence::persistence_lock<argo::globallock::cohort_lock>(new argo::globallock::cohort_lock());
+		persistence_registry.get_tracker()->join_apb(); // TODO: Shouldn't be needed. Incorporate APBs in normal barriers?
 	}
 
 	int beg, end;
@@ -78,6 +79,7 @@ void TATP_DB::initialize(unsigned num_subscribers, int n) {
 
 TATP_DB::~TATP_DB(){
 	for(int i=0; i<total_subscribers; i++) {
+		delete lock_[i]->get_lock();
 		delete lock_[i];
 	}
 	delete[] lock_;
@@ -109,7 +111,7 @@ void TATP_DB::populate_tables(unsigned num_subscribers) {
 			}
 		}
 	}
-	argo::barrier();
+	argo::backend::persistence::apb_barrier(&argo::barrier, 1UL);
 }
 
 void TATP_DB::fill_subscriber_entry(unsigned _s_id) {
