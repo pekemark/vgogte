@@ -26,13 +26,14 @@ TPCC_DB* tpcc_db;
 void initialize() {
 	tpcc_db = new TPCC_DB;
 	tpcc_db->initialize(NUM_WAREHOUSES, NUM_THREADS*numtasks, NUM_LOCKS);
-	argo::barrier();
+	argo::backend::persistence::apb_barrier(&argo::barrier, 1UL);
 	
 	MAIN_PROC(workrank, fprintf(stderr, "Created tpcc at %p\n", (void *)tpcc_db));
 }
 
 //void new_orders(TxEngine* tx_engine, int tx_engn_type, TPCC_DB* tpcc_db, int thread_id, int num_orders, int num_threads, int num_strands_per_thread, std::atomic<bool>*wait) {
 void* new_orders(void* arguments) {
+	persistence_registry.register_thread();
 	int thread_id = *((int*)arguments);
 
 	for(int i=0; i<NUM_ORDERS/(NUM_THREADS*numtasks); i++) {
@@ -43,11 +44,13 @@ void* new_orders(void* arguments) {
 
 		tpcc_db->new_order_tx(thread_id, w_id, d_id, c_id);
 	}
+	persistence_registry.unregister_thread();
 	return 0;
 }
 
 int main(int argc, char* argv[]) {
 	argo::init(500*1024*1024UL);
+	persistence_registry.register_thread();
 
 	workrank = argo::node_id();
 	numtasks = argo::number_of_nodes();
@@ -69,6 +72,8 @@ int main(int argc, char* argv[]) {
 	pthread_t threads[NUM_THREADS];
 	int global_tid[NUM_THREADS];
 
+	persistence_registry.get_tracker()->allow_apb();
+
 	gettimeofday(&tv_start, NULL);
 	for(int i=0; i<NUM_THREADS; i++) {
 		global_tid[i] = workrank*NUM_THREADS + i;
@@ -77,7 +82,7 @@ int main(int argc, char* argv[]) {
 	for(int i=0; i<NUM_THREADS; i++) {
 		pthread_join(threads[i], NULL);
 	}
-	argo::barrier();
+	argo::backend::persistence::apb_barrier(&argo::barrier, 1UL);
 	gettimeofday(&tv_end, NULL);
 
 	MAIN_PROC(workrank, fprintf(stderr, "time elapsed %ld us\n",
@@ -90,6 +95,7 @@ int main(int argc, char* argv[]) {
 
 	MAIN_PROC(workrank, std::cout<<"Done with threads"<<std::endl);
 
+	persistence_registry.unregister_thread();
 	argo::finalize();
 
 	return 0;

@@ -10,6 +10,7 @@ This file declares the tpcc database and the accesor transactions.
 
 #include "argo.hpp"
 #include "cohort_lock.hpp"
+#include "backend/mpi/persistence.hpp"
 
 #include <atomic>
 #include <cstdlib>
@@ -60,7 +61,7 @@ class TPCC_DB {
 		unsigned long* rndm_seeds;
 
 		queue_t* perTxLocks; // Array of queues of locks held by active Tx
-		argo::globallock::cohort_lock** locks; // Array of locks held by the TxEngn. RDSs acquire locks through the TxEngn
+		argo::backend::persistence::persistence_lock<argo::globallock::cohort_lock>** locks; // Array of locks held by the TxEngn. RDSs acquire locks through the TxEngn
 	public:
 		TPCC_DB();
 		~TPCC_DB();

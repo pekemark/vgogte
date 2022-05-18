@@ -55,9 +55,10 @@ void TPCC_DB::initialize(int _num_warehouses, int numThreads, int numLocks) {
 		perTxLocks[i].pop();
 	}
 
-	locks = new argo::globallock::cohort_lock*[numLocks];
+	locks = new argo::backend::persistence::persistence_lock<argo::globallock::cohort_lock>*[numLocks];
 	for(int i=0; i<numLocks; i++) {
-		locks[i] = new argo::globallock::cohort_lock();
+		locks[i] = new argo::backend::persistence::persistence_lock<argo::globallock::cohort_lock>(new argo::globallock::cohort_lock());
+		persistence_registry.get_tracker()->join_apb(); // TODO: Shouldn't be needed. Incorporate APBs in normal barriers?
 	}
 
 	MAIN_PROC(workrank, std::cout<<"Allocating tables"<<std::endl);
@@ -102,6 +103,7 @@ void TPCC_DB::initialize(int _num_warehouses, int numThreads, int numLocks) {
 TPCC_DB::~TPCC_DB(){
 	delete[] perTxLocks;
 	for(int i=0; i<num_locks; i++) {
+		delete locks[i]->get_lock();
 		delete locks[i];
 	}
 	delete[] locks;
@@ -130,6 +132,7 @@ void TPCC_DB::populate_tables() {
 
 	distribute(beg, end, num_warehouses, 0, 0);
 
+	auto ptrack = persistence_registry.get_tracker();
 	for(int i=beg; i<end; i++) {
 		fill_warehouse_entry(i+1);
 		for(int j=0; j<NUM_ITEMS; j++) {
@@ -142,13 +145,15 @@ void TPCC_DB::populate_tables() {
 				fill_customer_entry(i+1, j+1, k+1);
 				fill_history_entry(i+1, j+1, k+1);
 				fill_order_entry(i+1, j+1, k+1);
+				ptrack->join_apb(); // TODO: Perhaps a better solution is to use a bigger log buffer.
 			}
 			for(int k=2100; k<3000; k++) {
 				fill_new_order_entry(i+1, j+1, k+1);
+				ptrack->join_apb(); // TODO: Perhaps a better solution is to use a bigger log buffer.
 			}
 		}
 	}
-	argo::barrier();
+	argo::backend::persistence::apb_barrier(&argo::barrier, 1UL);
 }
 
 void TPCC_DB::acquire_locks(int threadId, queue_t &requestedLocks) {
